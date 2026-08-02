@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DFS Admin Intake Dashboard</title>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -21,78 +22,120 @@
 const { useState, useEffect, useCallback } = React;
 
 
-// ── SharePoint Configuration ─────────────────────────────────────────────
-const SP_SITE = "https://delatorgroup.sharepoint.com/sites/DelatorGroup";
+// ── MSAL + Microsoft Graph Configuration ────────────────────────────────
+const CLIENT_ID = "078588e5-1121-49cd-9f92-428a78165fbf";
+const TENANT_ID = "32573d35-121d-47e6-8265-005e60a82475";
+const SP_SITE_ID = "delatorgroup.sharepoint.com,/sites/DelatorGroup";
+const SP_SITE_URL = "https://delatorgroup.sharepoint.com/sites/DelatorGroup";
 const LISTS = {
   DFS_JOBS: "036daaef-2fb1-4cfb-b3eb-bd930075dccc",
   CLIENTS:  "6b6809a5-4b04-4010-9776-47580927a9b5",
   SERVERS:  "Servers",
 };
 
-// SharePoint REST API helper
-const spFetch = async (url, options = {}) => {
-  const res = await fetch(`${SP_SITE}/_api/${url}`, {
-    headers: {
-      "Accept": "application/json;odata=verbose",
-      "Content-Type": "application/json;odata=verbose",
-      ...options.headers,
-    },
-    credentials: "include",
-    ...options,
-  });
-  if (!res.ok) throw new Error(`SP API error: ${res.status} ${res.statusText}`);
-  const data = await res.json();
-  return data?.d?.results ?? data?.d ?? data;
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: window.location.href.split("?")[0],
+  },
+  cache: { cacheLocation: "sessionStorage" }
 };
 
-const getDigest = async () => {
-  const res = await fetch(`${SP_SITE}/_api/contextinfo`, {
-    method: "POST",
-    headers: { "Accept": "application/json;odata=verbose" },
-    credentials: "include",
+const scopes = ["https://graph.microsoft.com/Sites.ReadWrite.All"];
+
+let msalInstance = null;
+let accessToken = null;
+
+const getMsal = () => {
+  if (!msalInstance) {
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+  }
+  return msalInstance;
+};
+
+const getToken = async () => {
+  if (accessToken) return accessToken;
+  const app = getMsal();
+  await app.initialize();
+  const accounts = app.getAllAccounts();
+  if (accounts.length > 0) {
+    try {
+      const result = await app.acquireTokenSilent({ scopes, account: accounts[0] });
+      accessToken = result.accessToken;
+      return accessToken;
+    } catch (e) {}
+  }
+  const result = await app.acquireTokenPopup({ scopes });
+  accessToken = result.accessToken;
+  return accessToken;
+};
+
+const graphFetch = async (url, options = {}) => {
+  const token = await getToken();
+  const res = await fetch(`https://graph.microsoft.com/v1.0${url}`, {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+    ...options,
   });
-  const data = await res.json();
-  return data?.d?.GetContextWebInformation?.FormDigestValue;
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Graph API error: ${res.status} ${err}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+};
+
+// Get SharePoint site ID for Graph API calls
+let spSiteId = null;
+const getSiteId = async () => {
+  if (spSiteId) return spSiteId;
+  const data = await graphFetch(`/sites/delatorgroup.sharepoint.com:/sites/DelatorGroup`);
+  spSiteId = data.id;
+  return spSiteId;
+};
+
+const spFetch = async (listIdOrName, query = "") => {
+  const siteId = await getSiteId();
+  // Try by GUID first, then by name
+  let listId = listIdOrName;
+  if (!listIdOrName.includes("-")) {
+    // It's a name, look it up
+    const lists = await graphFetch(`/sites/${siteId}/lists`);
+    const found = lists.value.find(l => l.name === listIdOrName || l.displayName === listIdOrName);
+    if (!found) throw new Error(`List not found: ${listIdOrName}`);
+    listId = found.id;
+  }
+  const data = await graphFetch(`/sites/${siteId}/lists/${listId}/items?expand=fields${query ? "&" + query : ""}`);
+  return data?.value?.map(item => ({ ID: item.id, ...item.fields })) ?? [];
 };
 
 const spPatch = async (listGuid, itemId, updates) => {
-  const digest = await getDigest();
-  const res = await fetch(
-    `${SP_SITE}/_api/web/lists(guid'${listGuid}')/items(${itemId})`,
-    {
-      method: "POST",
-      headers: {
-        "Accept": "application/json;odata=verbose",
-        "Content-Type": "application/json;odata=verbose",
-        "X-RequestDigest": digest,
-        "X-HTTP-Method": "MERGE",
-        "IF-MATCH": "*",
-      },
-      credentials: "include",
-      body: JSON.stringify(updates),
-    }
-  );
-  if (!res.ok && res.status !== 204) throw new Error(`Patch failed: ${res.status}`);
+  const siteId = await getSiteId();
+  // Remove metadata field
+  const { "__metadata": _, ...fields } = updates;
+  // Convert SharePoint internal names to Graph field names
+  const graphFields = {};
+  for (const [key, val] of Object.entries(fields)) {
+    graphFields[key] = val;
+  }
+  await graphFetch(`/sites/${siteId}/lists/${listGuid}/items/${itemId}/fields`, {
+    method: "PATCH",
+    body: JSON.stringify(graphFields),
+  });
 };
 
 const spPost = async (listGuid, data) => {
-  const digest = await getDigest();
-  const res = await fetch(
-    `${SP_SITE}/_api/web/lists(guid'${listGuid}')/items`,
-    {
-      method: "POST",
-      headers: {
-        "Accept": "application/json;odata=verbose",
-        "Content-Type": "application/json;odata=verbose",
-        "X-RequestDigest": digest,
-      },
-      credentials: "include",
-      body: JSON.stringify(data),
-    }
-  );
-  if (!res.ok) throw new Error(`Post failed: ${res.status}`);
-  const result = await res.json();
-  return result?.d;
+  const siteId = await getSiteId();
+  const { "__metadata": _, ...fields } = data;
+  const result = await graphFetch(`/sites/${siteId}/lists/${listGuid}/items`, {
+    method: "POST",
+    body: JSON.stringify({ fields }),
+  });
+  return result?.fields;
 };
 
 // ── Brand colors ─────────────────────────────────────────────────────────
