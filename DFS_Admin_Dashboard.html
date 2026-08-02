@@ -395,9 +395,7 @@ function App() {
     try {
       const filter = "Operational_x0020_Status eq 'New Request' or Operational_x0020_Status eq 'Pending Admin Review'";
       const select = "ID,Title,Operational_x0020_Status,Service_x0020_Level,Client_x0020_Account_x0020_Raw,Client_x0020_Account,Submitting_x0020_Contact,Submitter_x0020_Email,Submitter_x0020_Phone,Client_x0020_Matter_x0020_Refe,Person_x0020_Entity_x0020_to_x00,Service_x0020_Address,County,Alternate_x0020_Address,Court,Docket_x0020_Case_x0020_Number,Special_x0020_Instructions,Documents_x0020_Uploaded,Server_x0020_Assigned,Created";
-      const data = await spFetch(
-        `web/lists(guid'${LISTS.DFS_JOBS}')/items?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(select)}&$orderby=Created desc&$top=100`
-      );
+      const data = await spFetch(LISTS.DFS_JOBS, `$filter=${encodeURIComponent(filter)}&$top=100`);
       const sorted = (data || []).sort((a, b) =>
         (SL_ORDER[a.Service_x0020_Level?.Value ?? a.Service_x0020_Level] ?? 9) -
         (SL_ORDER[b.Service_x0020_Level?.Value ?? b.Service_x0020_Level] ?? 9)
@@ -411,10 +409,8 @@ function App() {
 
   const loadClients = useCallback(async () => {
     try {
-      const data = await spFetch(
-        `web/lists(guid'${LISTS.CLIENTS}')/items?$select=ID,Account_x0020_Name&$orderby=Account_x0020_Name&$top=200`
-      );
-      setClients(data || []);
+      const data = await spFetch(LISTS.CLIENTS, "$top=200");
+      setClients((data || []).map(c => ({ ID: c.ID, Account_x0020_Name: c.Account_x0020_Name || c.AccountName || c.Title })));
     } catch (e) {
       console.warn("Could not load clients:", e.message);
     }
@@ -422,10 +418,8 @@ function App() {
 
   const loadServers = useCallback(async () => {
     try {
-      const data = await spFetch(
-        `web/lists/getbytitle('Servers')/items?$select=ID,Title&$orderby=Title&$top=100`
-      );
-      setServers((data || []).map(s => s.Title));
+      const data = await spFetch(LISTS.SERVERS, "$top=100");
+      setServers((data || []).map(s => s.Title || s.title));
     } catch (e) {
       console.warn("Could not load servers:", e.message);
       setServers(["Paris", "Johnson", "Williams", "Davis", "Martinez"]);
@@ -470,7 +464,6 @@ function App() {
         setConfirm(null);
         try {
           const updates = {
-            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
             "Operational_x0020_Status": "Approved",
             "Server_x0020_Assigned": is.serverAssigned || "",
           };
@@ -512,7 +505,6 @@ function App() {
         setConfirm(null);
         try {
           await spPatch(LISTS.DFS_JOBS, job.ID, {
-            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
             "Operational_x0020_Status": "Awaiting Client Correction",
           });
           setJobs(p => p.filter(j => j.ID !== selectedId));
@@ -539,7 +531,6 @@ function App() {
         setConfirm(null);
         try {
           await spPatch(LISTS.DFS_JOBS, job.ID, {
-            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
             "Operational_x0020_Status": "Canceled Before Attempt",
           });
           setJobs(p => p.filter(j => j.ID !== selectedId));
@@ -558,7 +549,6 @@ function App() {
   const handleCreateClient = async (formData) => {
     try {
       const newClient = await spPost(LISTS.CLIENTS, {
-        "__metadata": { "type": "SP.Data.ClientsListItem" },
         "Title": formData.accountName,
         "Account_x0020_Name": formData.accountName,
         "Primary_x0020_Contact": formData.contactName,
