@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DFS Admin Intake Dashboard</title>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #F1F4F8; }
+  ::-webkit-scrollbar-thumb { background: #94A3B8; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback } = React;
+
+
+// ── SharePoint Configuration ─────────────────────────────────────────────
+const SP_SITE = "https://delatorgroup.sharepoint.com/sites/DelatorGroup";
+const LISTS = {
+  DFS_JOBS: "036daaef-2fb1-4cfb-b3eb-bd930075dccc",
+  CLIENTS:  "6b6809a5-4b04-4010-9776-47580927a9b5",
+  SERVERS:  "Servers",
+};
+
+// SharePoint REST API helper
+const spFetch = async (url, options = {}) => {
+  const res = await fetch(`${SP_SITE}/_api/${url}`, {
+    headers: {
+      "Accept": "application/json;odata=verbose",
+      "Content-Type": "application/json;odata=verbose",
+      ...options.headers,
+    },
+    credentials: "include",
+    ...options,
+  });
+  if (!res.ok) throw new Error(`SP API error: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  return data?.d?.results ?? data?.d ?? data;
+};
+
+const getDigest = async () => {
+  const res = await fetch(`${SP_SITE}/_api/contextinfo`, {
+    method: "POST",
+    headers: { "Accept": "application/json;odata=verbose" },
+    credentials: "include",
+  });
+  const data = await res.json();
+  return data?.d?.GetContextWebInformation?.FormDigestValue;
+};
+
+const spPatch = async (listGuid, itemId, updates) => {
+  const digest = await getDigest();
+  const res = await fetch(
+    `${SP_SITE}/_api/web/lists(guid'${listGuid}')/items(${itemId})`,
+    {
+      method: "POST",
+      headers: {
+        "Accept": "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+        "X-RequestDigest": digest,
+        "X-HTTP-Method": "MERGE",
+        "IF-MATCH": "*",
+      },
+      credentials: "include",
+      body: JSON.stringify(updates),
+    }
+  );
+  if (!res.ok && res.status !== 204) throw new Error(`Patch failed: ${res.status}`);
+};
+
+const spPost = async (listGuid, data) => {
+  const digest = await getDigest();
+  const res = await fetch(
+    `${SP_SITE}/_api/web/lists(guid'${listGuid}')/items`,
+    {
+      method: "POST",
+      headers: {
+        "Accept": "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+        "X-RequestDigest": digest,
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    }
+  );
+  if (!res.ok) throw new Error(`Post failed: ${res.status}`);
+  const result = await res.json();
+  return result?.d;
+};
+
+// ── Brand colors ─────────────────────────────────────────────────────────
+const C = {
+  navy: "#1B2A4A", navyDark: "#111B30", navyLight: "#253A63",
+  steel: "#3A5A8C", steelLight: "#4A70A8", steelXLight: "#D0DFF0",
+  white: "#FFFFFF", offwhite: "#F7F9FC",
+  gray50: "#F8FAFC", gray100: "#F1F4F8", gray200: "#E2E8F0",
+  gray300: "#CBD5E1", gray400: "#94A3B8", gray600: "#64748B", gray800: "#1E293B",
+  red: "#C0392B", redLight: "#FDECEA", redBorder: "#E57373",
+  green: "#196F3D", greenLight: "#E8F5E9",
+  amber: "#B45309", amberLight: "#FEF3C7", amberBorder: "#F59E0B",
+  silver: "#8A9BB0",
+};
+
+const SL_CFG = {
+  "Same Day Rush": { color: C.red,    bg: C.redLight,    border: C.redBorder,   deadline: "Today"   },
+  "Rush":          { color: C.amber,  bg: C.amberLight,  border: C.amberBorder, deadline: "+2 days" },
+  "Urgent":        { color: C.steel,  bg: C.steelXLight, border: C.steelLight,  deadline: "+5 days" },
+  "Routine":       { color: C.gray600,bg: C.gray100,     border: C.gray300,     deadline: "+7 days" },
+};
+const SL_ORDER = { "Same Day Rush": 0, "Rush": 1, "Urgent": 2, "Routine": 3 };
+
+const TN_COUNTIES = [
+  "Anderson","Bedford","Benton","Bledsoe","Blount","Bradley","Campbell",
+  "Cannon","Carroll","Carter","Cheatham","Chester","Claiborne","Clay",
+  "Cocke","Coffee","Crockett","Cumberland","Davidson","Decatur","DeKalb",
+  "Dickson","Dyer","Fayette","Fentress","Franklin","Gibson","Giles",
+  "Grainger","Greene","Grundy","Hamblen","Hamilton","Hancock","Hardeman",
+  "Hardin","Hawkins","Haywood","Henderson","Henry","Hickman","Houston",
+  "Humphreys","Jackson","Jefferson","Johnson","Knox","Lake","Lauderdale",
+  "Lawrence","Lewis","Lincoln","Loudon","McMinn","McNairy","Macon",
+  "Madison","Marion","Marshall","Maury","Meigs","Monroe","Montgomery",
+  "Moore","Morgan","Obion","Overton","Perry","Pickett","Polk","Putnam",
+  "Rhea","Roane","Robertson","Rutherford","Scott","Sequatchie","Sevier",
+  "Shelby","Smith","Stewart","Sullivan","Sumner","Tipton","Trousdale",
+  "Unicoi","Union","Van Buren","Warren","Washington","Wayne","Weakley",
+  "White","Williamson","Wilson"
+];
+
+const COMMERCIAL_TYPES = [
+  "Office Building","Medical Facility","School / University",
+  "Government Building","Courthouse","Apartment Complex",
+  "Retail / Commercial","Industrial / Warehouse","Other"
+];
+
+const STAFF = ["Parker, MJ","Roby, R","Buffalino, E","Maese, P","Other"];
+
+const LOGO_B64 = "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";
+
+// ── Small reusable UI components ─────────────────────────────────────────
+const Badge = ({ level }) => {
+  const c = SL_CFG[level] || { color: C.gray600, bg: C.gray100, border: C.gray300 };
+  return (
+    <span style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}`,
+      borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700,
+      letterSpacing: "0.5px", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+      {level}
+    </span>
+  );
+};
+
+const SLabel = ({ children }) => (
+  <span style={{ fontSize: 10, fontWeight: 700, color: C.gray400,
+    textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 3 }}>
+    {children}
+  </span>
+);
+
+const SectionBar = ({ children, color = C.navy }) => (
+  <div style={{ background: color, color: C.white, fontWeight: 700, fontSize: 11,
+    textTransform: "uppercase", letterSpacing: "1.5px", padding: "5px 12px",
+    borderRadius: 4, marginBottom: 12, marginTop: 4 }}>
+    {children}
+  </div>
+);
+
+const Divider = () => <div style={{ height: 1, background: C.gray200, margin: "18px 0" }} />;
+
+const ROField = ({ label, value, highlight, wide }) => (
+  <div style={{ gridColumn: wide ? "1 / -1" : undefined }}>
+    <SLabel>{label}</SLabel>
+    <span style={{ fontSize: 13,
+      color: highlight ? (value ? C.navy : C.red) : (value ? C.gray800 : C.gray400),
+      fontWeight: highlight && value ? 600 : 400, fontStyle: value ? "normal" : "italic" }}>
+      {value || "—"}
+    </span>
+  </div>
+);
+
+const EditField = ({ label, value, onChange, placeholder, wide, textarea }) => (
+  <div style={{ gridColumn: wide ? "1 / -1" : undefined }}>
+    <SLabel>{label}</SLabel>
+    {textarea
+      ? <textarea value={value || ""} onChange={e => onChange(e.target.value)}
+          placeholder={placeholder} rows={3}
+          style={{ width: "100%", border: `1px solid ${C.steelLight}`, borderRadius: 4,
+            padding: "6px 8px", fontSize: 13, color: C.gray800, resize: "vertical",
+            fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+      : <input type="text" value={value || ""} onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          style={{ width: "100%", border: `1px solid ${C.steelLight}`, borderRadius: 4,
+            padding: "6px 8px", fontSize: 13, color: C.gray800, outline: "none",
+            boxSizing: "border-box" }} />}
+  </div>
+);
+
+const CheckItem = ({ label, checked, onChange, danger }) => (
+  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
+    padding: "5px 0", borderBottom: `1px solid ${C.gray100}` }}>
+    <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
+      style={{ marginTop: 2, accentColor: danger ? C.red : C.navy, flexShrink: 0 }} />
+    <span style={{ fontSize: 12,
+      color: danger ? (checked ? C.red : C.gray800) : C.gray800,
+      fontWeight: danger && checked ? 700 : 400 }}>
+      {label}
+    </span>
+  </label>
+);
+
+const Toast = ({ message, type, onClose }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, []);
+  const cols = {
+    success: { bg: C.greenLight, border: C.green, color: C.green },
+    error:   { bg: C.redLight,   border: C.red,   color: C.red   },
+    warning: { bg: C.amberLight, border: C.amberBorder, color: C.amber },
+  };
+  const c = cols[type] || cols.success;
+  return (
+    <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999,
+      background: c.bg, border: `1px solid ${c.border}`, color: c.color,
+      borderRadius: 6, padding: "12px 20px", fontSize: 13, fontWeight: 600,
+      boxShadow: "0 4px 12px rgba(0,0,0,0.15)", display: "flex", alignItems: "center", gap: 10 }}>
+      {message}
+      <button onClick={onClose} style={{ background: "none", border: "none",
+        cursor: "pointer", color: c.color, fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
+    </div>
+  );
+};
+
+const Spinner = () => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+    height: "100vh", flexDirection: "column", gap: 16 }}>
+    <div style={{ width: 40, height: 40, border: `3px solid ${C.steelXLight}`,
+      borderTop: `3px solid ${C.steel}`, borderRadius: "50%",
+      animation: "spin 0.8s linear infinite" }} />
+    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <span style={{ color: C.gray600, fontSize: 13 }}>Loading jobs from SharePoint...</span>
+  </div>
+);
+
+const ConfirmDialog = ({ action, onCancel }) => {
+  const [reason, setReason] = useState("");
+  const cols = { success: C.green, error: C.red, warning: C.amber };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: C.white, borderRadius: 8, padding: 24, maxWidth: 440,
+        width: "90%", boxShadow: "0 20px 40px rgba(0,0,0,0.3)" }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: C.navy, marginBottom: 8 }}>
+          {action.label}
+        </div>
+        <div style={{ fontSize: 13, color: C.gray600, lineHeight: 1.6, marginBottom: 14 }}>
+          {action.message}
+        </div>
+        {action.showReason && (
+          <>
+            <SLabel>{action.reasonLabel || "Reason"}</SLabel>
+            <textarea value={reason} onChange={e => setReason(e.target.value)}
+              placeholder="Enter reason..." rows={3}
+              style={{ width: "100%", border: `1px solid ${C.gray300}`, borderRadius: 4,
+                padding: "6px 8px", fontSize: 13, marginBottom: 14,
+                fontFamily: "inherit", resize: "vertical", outline: "none",
+                boxSizing: "border-box" }} />
+          </>
+        )}
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onCancel} style={{ background: C.gray100, color: C.gray600,
+            border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13,
+            cursor: "pointer" }}>Go Back</button>
+          <button onClick={() => action.onConfirm(reason)}
+            style={{ background: cols[action.type] || C.green, color: C.white,
+              border: "none", borderRadius: 6, padding: "8px 18px", fontSize: 13,
+              fontWeight: 700, cursor: "pointer" }}>
+            {action.confirmLabel || "Confirm"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── New Client Mini-Form ─────────────────────────────────────────────────
+const NewClientForm = ({ prefill, onSave, onCancel }) => {
+  const [form, setForm] = useState({
+    accountName: prefill || "", contactName: "", email: "",
+    phone: "", billingEmail: "", address: ""
+  });
+  const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  return (
+    <div style={{ background: C.steelXLight, border: `1px solid ${C.steelLight}`,
+      borderRadius: 8, padding: 16, marginBottom: 16 }}>
+      <div style={{ fontWeight: 700, fontSize: 13, color: C.navy, marginBottom: 12 }}>
+        New Client — Create Account
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", marginBottom: 12 }}>
+        {[
+          ["accountName", "Firm / Account Name", true],
+          ["contactName", "Primary Contact", false],
+          ["phone", "Phone", false],
+          ["email", "Email", false],
+          ["billingEmail", "Billing Email (if different)", false],
+          ["address", "Street Address", false],
+        ].map(([k, label, wide]) => (
+          <div key={k} style={{ gridColumn: wide ? "1 / -1" : undefined }}>
+            <SLabel>{label}</SLabel>
+            <input value={form[k]} onChange={e => f(k, e.target.value)}
+              style={{ width: "100%", border: `1px solid ${C.steelLight}`, borderRadius: 4,
+                padding: "6px 8px", fontSize: 13, boxSizing: "border-box", outline: "none" }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => onSave(form)}
+          style={{ background: C.navy, color: C.white, border: "none", borderRadius: 6,
+            padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          Create Client Record
+        </button>
+        <button onClick={onCancel}
+          style={{ background: C.gray100, color: C.gray600, border: "none",
+            borderRadius: 6, padding: "8px 16px", fontSize: 12, cursor: "pointer" }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── Main App ─────────────────────────────────────────────────────────────
+function App() {
+  const [jobs, setJobs] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [servers, setServers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [toast, setToast] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [intakeState, setIntakeState] = useState({});
+
+  const notify = (msg, type = "success") => setToast({ message: msg, type });
+
+  // ── Load data from SharePoint ──────────────────────────────────────────
+  const loadJobs = useCallback(async () => {
+    try {
+      const filter = "Operational_x0020_Status eq 'New Request' or Operational_x0020_Status eq 'Pending Admin Review'";
+      const select = "ID,Title,Operational_x0020_Status,Service_x0020_Level,Client_x0020_Account_x0020_Raw,Client_x0020_Account,Submitting_x0020_Contact,Submitter_x0020_Email,Submitter_x0020_Phone,Client_x0020_Matter_x0020_Refe,Person_x0020_Entity_x0020_to_x00,Service_x0020_Address,County,Alternate_x0020_Address,Court,Docket_x0020_Case_x0020_Number,Special_x0020_Instructions,Documents_x0020_Uploaded,Server_x0020_Assigned,Created";
+      const data = await spFetch(
+        `web/lists(guid'${LISTS.DFS_JOBS}')/items?$filter=${encodeURIComponent(filter)}&$select=${encodeURIComponent(select)}&$orderby=Created desc&$top=100`
+      );
+      const sorted = (data || []).sort((a, b) =>
+        (SL_ORDER[a.Service_x0020_Level?.Value ?? a.Service_x0020_Level] ?? 9) -
+        (SL_ORDER[b.Service_x0020_Level?.Value ?? b.Service_x0020_Level] ?? 9)
+      );
+      setJobs(sorted);
+      if (sorted.length > 0 && !selectedId) setSelectedId(sorted[0].ID);
+    } catch (e) {
+      setLoadError(e.message);
+    }
+  }, []);
+
+  const loadClients = useCallback(async () => {
+    try {
+      const data = await spFetch(
+        `web/lists(guid'${LISTS.CLIENTS}')/items?$select=ID,Account_x0020_Name&$orderby=Account_x0020_Name&$top=200`
+      );
+      setClients(data || []);
+    } catch (e) {
+      console.warn("Could not load clients:", e.message);
+    }
+  }, []);
+
+  const loadServers = useCallback(async () => {
+    try {
+      const data = await spFetch(
+        `web/lists/getbytitle('Servers')/items?$select=ID,Title&$orderby=Title&$top=100`
+      );
+      setServers((data || []).map(s => s.Title));
+    } catch (e) {
+      console.warn("Could not load servers:", e.message);
+      setServers(["Paris", "Johnson", "Williams", "Davis", "Martinez"]);
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.all([loadJobs(), loadClients(), loadServers()])
+      .finally(() => setLoading(false));
+  }, []);
+
+  const getIS = () => intakeState[selectedId] || {};
+  const setIS = updates => setIntakeState(p => ({ ...p, [selectedId]: { ...p[selectedId], ...updates } }));
+  const is = getIS();
+
+  const job = jobs.find(j => j.ID === selectedId);
+  const jobSL = job?.Service_x0020_Level?.Value ?? job?.Service_x0020_Level ?? "Routine";
+  const jobStatus = job?.Operational_x0020_Status?.Value ?? job?.Operational_x0020_Status ?? "";
+
+  const filteredJobs = jobs.filter(j => {
+    if (!search) return true;
+    const sl = j.Service_x0020_Level?.Value ?? j.Service_x0020_Level ?? "";
+    const raw = j.Client_x0020_Account_x0020_Raw ?? "";
+    const person = j.Person_x0020_Entity_x0020_to_x00 ?? "";
+    const county = j.County ?? "";
+    const title = j.Title ?? "";
+    const q = search.toLowerCase();
+    return title.toLowerCase().includes(q) || raw.toLowerCase().includes(q) ||
+           person.toLowerCase().includes(q) || county.toLowerCase().includes(q);
+  });
+
+  // ── Actions ──────────────────────────────────────────────────────────
+  const handleApprove = () => {
+    if (!is.serverAssigned) { notify("Assign a server before approving", "warning"); return; }
+    if (is.existingClient === undefined) { notify("Confirm client status before approving", "warning"); return; }
+    setConfirm({
+      label: `Approve Job ${job.Title}`,
+      message: `This will set Operational Status to Approved, triggering FLOW-02: Job ID assignment, folder creation, packet documents, and client confirmation email.`,
+      type: "success", confirmLabel: "Approve & Trigger Flow",
+      onConfirm: async () => {
+        setSaving(true);
+        setConfirm(null);
+        try {
+          const updates = {
+            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
+            "Operational_x0020_Status": "Approved",
+            "Server_x0020_Assigned": is.serverAssigned || "",
+          };
+          if (is.court !== undefined) updates["Court"] = is.court;
+          if (is.docketCaseNumber !== undefined) updates["Docket_x0020_Case_x0020_Number"] = is.docketCaseNumber;
+          if (is.county) updates["County"] = is.county;
+          if (is.alternateAddress !== undefined) updates["Alternate_x0020_Address"] = is.alternateAddress;
+          if (is.existingClient && is.selectedClient) {
+            // Find client ID from clients list and set lookup
+            const matchedClient = clients.find(c =>
+              (c.Account_x0020_Name || "").toLowerCase() === is.selectedClient.toLowerCase()
+            );
+            if (matchedClient) {
+              updates["Client_x0020_AccountId"] = matchedClient.ID;
+            }
+          }
+          await spPatch(LISTS.DFS_JOBS, job.ID, updates);
+          setJobs(p => p.filter(j => j.ID !== selectedId));
+          const remaining = jobs.filter(j => j.ID !== selectedId);
+          setSelectedId(remaining.length > 0 ? remaining[0].ID : null);
+          notify(`Job ${job.Title} approved — FLOW-02 triggered`, "success");
+        } catch (e) {
+          notify(`Error: ${e.message}`, "error");
+        } finally {
+          setSaving(false);
+        }
+      }
+    });
+  };
+
+  const handleReturn = () => {
+    setConfirm({
+      label: `Return Job ${job.Title} to Client`,
+      message: `The job will move to Awaiting Client Correction. Add a note explaining what needs to be fixed.`,
+      type: "warning", showReason: true, reasonLabel: "What needs to be corrected?",
+      confirmLabel: "Return to Client",
+      onConfirm: async (reason) => {
+        setSaving(true);
+        setConfirm(null);
+        try {
+          await spPatch(LISTS.DFS_JOBS, job.ID, {
+            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
+            "Operational_x0020_Status": "Awaiting Client Correction",
+          });
+          setJobs(p => p.filter(j => j.ID !== selectedId));
+          const remaining = jobs.filter(j => j.ID !== selectedId);
+          setSelectedId(remaining.length > 0 ? remaining[0].ID : null);
+          notify(`Job ${job.Title} returned to client`, "warning");
+        } catch (e) {
+          notify(`Error: ${e.message}`, "error");
+        } finally {
+          setSaving(false);
+        }
+      }
+    });
+  };
+
+  const handleCancel = () => {
+    setConfirm({
+      label: `Cancel Job ${job.Title}`,
+      message: `The job will be marked Canceled Before Attempt and removed from the queue. This cannot be undone.`,
+      type: "error", showReason: true, reasonLabel: "Reason for cancellation",
+      confirmLabel: "Cancel Job",
+      onConfirm: async (reason) => {
+        setSaving(true);
+        setConfirm(null);
+        try {
+          await spPatch(LISTS.DFS_JOBS, job.ID, {
+            "__metadata": { "type": "SP.Data.DFS_x0020_JobsListItem" },
+            "Operational_x0020_Status": "Canceled Before Attempt",
+          });
+          setJobs(p => p.filter(j => j.ID !== selectedId));
+          const remaining = jobs.filter(j => j.ID !== selectedId);
+          setSelectedId(remaining.length > 0 ? remaining[0].ID : null);
+          notify(`Job ${job.Title} canceled`, "error");
+        } catch (e) {
+          notify(`Error: ${e.message}`, "error");
+        } finally {
+          setSaving(false);
+        }
+      }
+    });
+  };
+
+  const handleCreateClient = async (formData) => {
+    try {
+      const newClient = await spPost(LISTS.CLIENTS, {
+        "__metadata": { "type": "SP.Data.ClientsListItem" },
+        "Title": formData.accountName,
+        "Account_x0020_Name": formData.accountName,
+        "Primary_x0020_Contact": formData.contactName,
+        "Email": formData.email,
+        "Phone": formData.phone,
+      });
+      await loadClients();
+      setIS({ showNewClientForm: false, existingClient: true,
+        selectedClient: formData.accountName, newClientCreated: true });
+      notify(`Client "${formData.accountName}" created`, "success");
+    } catch (e) {
+      notify(`Error creating client: ${e.message}`, "error");
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────
+  if (loading) return <Spinner />;
+
+  if (loadError) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+      height: "100vh", flexDirection: "column", gap: 16, padding: 32 }}>
+      <div style={{ fontSize: 32 }}>⚠️</div>
+      <div style={{ fontWeight: 700, fontSize: 16, color: C.navy }}>Could not connect to SharePoint</div>
+      <div style={{ fontSize: 13, color: C.gray600, maxWidth: 400, textAlign: "center" }}>
+        {loadError}. Make sure you are logged into your Delator Group SharePoint account in this browser.
+      </div>
+      <button onClick={() => { setLoading(true); setLoadError(null); loadJobs().finally(() => setLoading(false)); }}
+        style={{ background: C.navy, color: C.white, border: "none", borderRadius: 6,
+          padding: "10px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+        Retry
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ fontFamily: "'Inter','Segoe UI',Arial,sans-serif", background: C.offwhite,
+      minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+
+      {/* ── HEADER ── */}
+      <div style={{ background: C.navy, borderBottom: `3px solid ${C.steel}`,
+        padding: "0 20px", display: "flex", alignItems: "center", height: 52, gap: 14, flexShrink: 0 }}>
+        <img src={`data:image/png;base64,${LOGO_B64}`} width={34} height={34}
+          alt="DFS" style={{ objectFit: "contain" }} />
+        <div>
+          <div style={{ color: C.white, fontWeight: 700, fontSize: 14, lineHeight: 1 }}>
+            Delator Field Services
+          </div>
+          <div style={{ color: C.silver, fontSize: 10, letterSpacing: "1.5px", textTransform: "uppercase" }}>
+            Admin Intake Dashboard
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ background: C.navyDark, border: `1px solid ${C.navyLight}`,
+          borderRadius: 20, padding: "4px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: C.gray400, fontSize: 12 }}>⌕</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search jobs, clients, counties..."
+            style={{ background: "none", border: "none", outline: "none",
+              color: C.white, fontSize: 12, width: 220 }} />
+        </div>
+        <button onClick={() => { setLoading(true); loadJobs().finally(() => setLoading(false)); }}
+          title="Refresh queue"
+          style={{ background: C.navyLight, border: "none", borderRadius: 6,
+            padding: "5px 10px", color: C.white, cursor: "pointer", fontSize: 14 }}>
+          ↻
+        </button>
+        <div style={{
+          background: filteredJobs.some(j => (j.Service_x0020_Level?.Value ?? j.Service_x0020_Level) === "Same Day Rush")
+            ? C.red : C.navyLight,
+          color: C.white, borderRadius: 12, padding: "3px 12px", fontSize: 11, fontWeight: 700 }}>
+          {filteredJobs.length} pending
+        </div>
+      </div>
+
+      {/* ── BODY ── */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "calc(100vh - 52px)" }}>
+
+        {/* ── LEFT: Job Queue ── */}
+        <div style={{ width: 290, background: C.white, borderRight: `1px solid ${C.gray200}`,
+          display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 }}>
+          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.gray200}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.navy,
+              textTransform: "uppercase", letterSpacing: "1px" }}>Pending Review</div>
+            <div style={{ fontSize: 11, color: C.gray400, marginTop: 1 }}>Sorted by urgency</div>
+          </div>
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {filteredJobs.length === 0 && (
+              <div style={{ padding: 32, textAlign: "center", color: C.gray400, fontSize: 13 }}>
+                {jobs.length === 0 ? "No jobs pending review" : "No matching jobs"}
+              </div>
+            )}
+            {filteredJobs.map(j => {
+              const sel = j.ID === selectedId;
+              const sl = j.Service_x0020_Level?.Value ?? j.Service_x0020_Level ?? "Routine";
+              const status = j.Operational_x0020_Status?.Value ?? j.Operational_x0020_Status ?? "";
+              return (
+                <div key={j.ID} onClick={() => setSelectedId(j.ID)}
+                  style={{ padding: "11px 14px", cursor: "pointer",
+                    borderBottom: `1px solid ${C.gray100}`,
+                    borderLeft: sel ? `3px solid ${C.steel}` : "3px solid transparent",
+                    background: sel ? "#EBF2FB" : "transparent", transition: "background 0.1s" }}>
+                  <div style={{ display: "flex", alignItems: "center",
+                    justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: C.navy,
+                      fontFamily: "monospace" }}>{j.Title || "—"}</span>
+                    <Badge level={sl} />
+                  </div>
+                  <div style={{ fontSize: 12, color: C.gray600, marginBottom: 3,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {j.Client_x0020_Account_x0020_Raw || "No client name"}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%",
+                      background: status === "New Request" ? C.steelLight : C.silver,
+                      display: "inline-block", flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: C.gray400, flex: 1 }}>{status}</span>
+                    {!j.Documents_x0020_Uploaded && (
+                      <span style={{ fontSize: 10, color: C.red, fontWeight: 700 }}>⚠ NO DOCS</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── RIGHT: Intake Form ── */}
+        {!job ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            color: C.gray400, fontSize: 14 }}>
+            {jobs.length === 0 ? "Queue is empty — no jobs pending review" : "Select a job to review"}
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+
+            {/* Job header bar */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20,
+              background: C.white, border: `1px solid ${C.gray200}`, borderRadius: 8, padding: "12px 16px" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 900, color: C.navy }}>
+                    {job.Title || "Pending ID"}
+                  </span>
+                  <Badge level={jobSL} />
+                  <span style={{ fontSize: 11, color: C.gray400 }}>
+                    {new Date(job.Created).toLocaleString("en-US",
+                      { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: C.gray600, marginTop: 3 }}>{jobStatus}</div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 10, color: C.gray400, textTransform: "uppercase",
+                  letterSpacing: "0.8px", marginBottom: 2 }}>First Attempt Deadline</div>
+                <div style={{ fontSize: 14, fontWeight: 700,
+                  color: jobSL === "Same Day Rush" ? C.red : C.navy }}>
+                  {SL_CFG[jobSL]?.deadline || "+7 days"} from approval
+                </div>
+              </div>
+            </div>
+
+            {/* ── 1. CLIENT VERIFICATION ── */}
+            <SectionBar>1. Client Verification</SectionBar>
+            <div style={{ background: C.white, border: `1px solid ${C.gray200}`,
+              borderRadius: 6, padding: 14, marginBottom: 6 }}>
+              <div style={{ marginBottom: 12 }}>
+                <SLabel>As Submitted by Client</SLabel>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>
+                  {job.Client_x0020_Account_x0020_Raw || "—"}
+                </span>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <SLabel>Existing Client?</SLabel>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {["Yes", "No"].map(v => (
+                    <button key={v}
+                      onClick={() => setIS({ existingClient: v === "Yes", showNewClientForm: v === "No", selectedClient: "" })}
+                      style={{ padding: "6px 20px", borderRadius: 6, fontSize: 13, fontWeight: 600,
+                        cursor: "pointer",
+                        border: `1.5px solid ${is.existingClient === (v === "Yes") ? C.steel : C.gray300}`,
+                        background: is.existingClient === (v === "Yes") ? C.steelXLight : C.white,
+                        color: is.existingClient === (v === "Yes") ? C.navy : C.gray600 }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {is.existingClient === true && (
+                <div>
+                  <SLabel>Match to Client Account</SLabel>
+                  <select value={is.selectedClient || ""}
+                    onChange={e => setIS({ selectedClient: e.target.value })}
+                    style={{ width: "100%", maxWidth: 400, border: `1px solid ${C.steelLight}`,
+                      borderRadius: 4, padding: "6px 8px", fontSize: 13, outline: "none" }}>
+                    <option value="">— Select existing client —</option>
+                    {clients.map(c => (
+                      <option key={c.ID} value={c.Account_x0020_Name}>{c.Account_x0020_Name}</option>
+                    ))}
+                  </select>
+                  {is.selectedClient && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.green, fontWeight: 600 }}>
+                      ✓ Matched: {is.selectedClient}
+                      {is.selectedClient.toLowerCase() === (job.Client_x0020_Account_x0020_Raw || "").toLowerCase()
+                        ? " — exact match" : " — verify spelling with client record"}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {is.showNewClientForm && (
+                <NewClientForm
+                  prefill={job.Client_x0020_Account_x0020_Raw}
+                  onSave={handleCreateClient}
+                  onCancel={() => setIS({ showNewClientForm: false, existingClient: undefined })}
+                />
+              )}
+              {is.newClientCreated && (
+                <div style={{ fontSize: 12, color: C.green, fontWeight: 600, marginTop: 4 }}>
+                  ✓ New client record created and matched
+                </div>
+              )}
+            </div>
+
+            <Divider />
+
+            {/* ── 2. DOCUMENTS ── */}
+            <SectionBar>2. Documents</SectionBar>
+            <div style={{ background: job.Documents_x0020_Uploaded ? C.greenLight : C.redLight,
+              border: `1px solid ${job.Documents_x0020_Uploaded ? C.green : C.red}`,
+              borderRadius: 6, padding: "10px 14px", marginBottom: 6,
+              display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 18 }}>{job.Documents_x0020_Uploaded ? "✅" : "⚠️"}</span>
+              <span style={{ fontSize: 13, fontWeight: 600,
+                color: job.Documents_x0020_Uploaded ? C.green : C.red }}>
+                {job.Documents_x0020_Uploaded
+                  ? "Client confirmed document upload — verify files in SharePoint file request folder"
+                  : "No document upload confirmed — do not approve until documents are received"}
+              </span>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <CheckItem label="Documents located in file request folder"
+                checked={is.docsLocated || false} onChange={v => setIS({ docsLocated: v })} />
+              <CheckItem label="Correct number of copies confirmed"
+                checked={is.docsCopiesOk || false} onChange={v => setIS({ docsCopiesOk: v })} />
+            </div>
+
+            <Divider />
+
+            {/* ── 3. TARGET INFORMATION ── */}
+            <SectionBar>3. Target Information</SectionBar>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+              gap: "12px 24px", marginBottom: 8 }}>
+              <ROField label="Person / Entity to Be Served"
+                value={job.Person_x0020_Entity_x0020_to_x00} highlight wide />
+              <ROField label="Primary Service Address"
+                value={job.Service_x0020_Address} highlight wide />
+              <div>
+                <SLabel>County</SLabel>
+                <select value={is.county || job.County || ""}
+                  onChange={e => setIS({ county: e.target.value })}
+                  style={{ width: "100%", border: `1px solid ${C.steelLight}`, borderRadius: 4,
+                    padding: "6px 8px", fontSize: 13, outline: "none" }}>
+                  <option value="">— Select county —</option>
+                  {TN_COUNTIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <SLabel>Address Type</SLabel>
+                <div style={{ display: "flex", gap: 16, paddingTop: 4 }}>
+                  {["Residential", "Commercial"].map(t => (
+                    <label key={t} style={{ display: "flex", alignItems: "center",
+                      gap: 5, fontSize: 13, cursor: "pointer" }}>
+                      <input type="radio" name={`addrType_${job.ID}`} value={t}
+                        checked={(is.addressType || "Residential") === t}
+                        onChange={() => setIS({ addressType: t, commercialType: "" })}
+                        style={{ accentColor: C.navy }} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+                {is.addressType === "Commercial" && (
+                  <select value={is.commercialType || ""}
+                    onChange={e => setIS({ commercialType: e.target.value })}
+                    style={{ marginTop: 8, width: "100%", border: `1px solid ${C.steelLight}`,
+                      borderRadius: 4, padding: "6px 8px", fontSize: 13, outline: "none" }}>
+                    <option value="">— Building type —</option>
+                    {COMMERCIAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                )}
+              </div>
+              <EditField label="Alternate Address"
+                value={is.alternateAddress ?? (job.Alternate_x0020_Address || "")}
+                onChange={v => setIS({ alternateAddress: v })} wide />
+              <EditField label="Subject Phone (if known)"
+                value={is.subjectPhone || ""}
+                onChange={v => setIS({ subjectPhone: v })} />
+              <EditField label="Safety Concerns"
+                value={is.safetyConcerns || ""}
+                onChange={v => setIS({ safetyConcerns: v })}
+                placeholder="Any known safety issues at this address..." />
+              <EditField label="Court (from uploaded documents)"
+                value={is.court ?? (job.Court || "")}
+                onChange={v => setIS({ court: v })}
+                placeholder="Pull from summons / subpoena" />
+              <EditField label="Case / Docket Number"
+                value={is.docketCaseNumber ?? (job.Docket_x0020_Case_x0020_Number || "")}
+                onChange={v => setIS({ docketCaseNumber: v })}
+                placeholder="Pull from summons / subpoena" />
+            </div>
+
+            {job.Special_x0020_Instructions && (
+              <div style={{ background: C.amberLight, border: `1px solid ${C.amberBorder}`,
+                borderRadius: 6, padding: "10px 14px", marginBottom: 8,
+                fontSize: 13, color: C.gray800, lineHeight: 1.6 }}>
+                <strong style={{ color: C.amber }}>Special Instructions: </strong>
+                {job.Special_x0020_Instructions}
+              </div>
+            )}
+
+            <Divider />
+
+            {/* ── 4. SERVICE FLAGS ── */}
+            <SectionBar>4. Service Flags</SectionBar>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+              gap: "0 24px", marginBottom: 8 }}>
+              <div>
+                <CheckItem label="Evasive Subject"
+                  checked={is.evadingService || false} onChange={v => setIS({ evadingService: v })} />
+                <CheckItem label="Stakeout Authorized"
+                  checked={is.stakeoutAuth || false} onChange={v => setIS({ stakeoutAuth: v })} />
+              </div>
+              <div>
+                <CheckItem label="Drop Service Allowed"
+                  checked={is.dropAllowed || false} onChange={v => setIS({ dropAllowed: v })} />
+                <CheckItem label="Sub-Service Allowed"
+                  checked={is.subAllowed || false} onChange={v => setIS({ subAllowed: v })} />
+              </div>
+            </div>
+
+            <Divider />
+
+            {/* ── 5. RETURN FLAGS ── */}
+            <SectionBar>5. Return Flags</SectionBar>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "0 24px", marginBottom: 8 }}>
+              <CheckItem label="Original Return Required"
+                checked={is.originalReturn || false} onChange={v => setIS({ originalReturn: v })} />
+              <CheckItem label="Service Affidavit Required"
+                checked={is.affidavitReq || false} onChange={v => setIS({ affidavitReq: v })} />
+              <CheckItem label="Notarization Required"
+                checked={is.notarizationReq || false} onChange={v => setIS({ notarizationReq: v })} />
+            </div>
+
+            <Divider />
+
+            {/* ── 6. STOP & ESCALATE ── */}
+            <SectionBar color={C.red}>6. Stop &amp; Escalate — Contact Randall Immediately</SectionBar>
+            <div style={{ background: C.redLight, border: `1px solid ${C.redBorder}`,
+              borderRadius: 6, padding: "8px 14px", marginBottom: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+                {[
+                  ["hostileSub",    "Hostile / Threatening Subject"],
+                  ["mediaInq",      "Media Inquiry"],
+                  ["lawEnf",        "Law Enforcement Involvement"],
+                  ["emergServ",     "Emergency Service Requested"],
+                  ["judgeInstr",    "Judge-Specific Instructions"],
+                  ["serverAssault", "Server Assault"],
+                  ["paymentDisp",   "Payment Dispute / Billing Issue"],
+                  ["procChallenge", "Process Challenge"],
+                ].map(([k, label]) => (
+                  <CheckItem key={k} label={label} danger
+                    checked={is[k] || false} onChange={v => setIS({ [k]: v })} />
+                ))}
+              </div>
+            </div>
+
+            <Divider />
+
+            {/* ── 7. SERVER ASSIGNMENT ── */}
+            <SectionBar>7. Server Assignment</SectionBar>
+            <div style={{ marginBottom: 8 }}>
+              <SLabel>Assign Server</SLabel>
+              <select value={is.serverAssigned || ""}
+                onChange={e => setIS({ serverAssigned: e.target.value })}
+                style={{ width: 280, border: `1px solid ${C.steelLight}`, borderRadius: 4,
+                  padding: "7px 10px", fontSize: 13, outline: "none" }}>
+                <option value="">— Select server —</option>
+                {servers.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            <Divider />
+
+            {/* ── 8. OPERATIONS PREP ── */}
+            <SectionBar>8. Operations Prep Checklist</SectionBar>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+              gap: "0 24px", marginBottom: 8 }}>
+              {[
+                ["opJobId",           "Job ID Assigned"],
+                ["opIndexCard",       "Index Card Completed"],
+                ["opListPop",         "Jobs List Populated"],
+                ["opFolderBuilt",     "Folder Structure Built"],
+                ["opPacketPrinted",   "Packet Printed"],
+                ["opPacketAssembled", "Packet Assembled"],
+                ["opEnvLabeled",      "Envelope Labeled"],
+                ["opServerNotified",  "Server Notified"],
+                ["opBilled",          "Job Billed"],
+              ].map(([k, label]) => (
+                <CheckItem key={k} label={label}
+                  checked={is[k] || false} onChange={v => setIS({ [k]: v })} />
+              ))}
+            </div>
+
+            <Divider />
+
+            {/* ── 9. PREPARED BY ── */}
+            <SectionBar>9. Prepared By</SectionBar>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr",
+              gap: "12px 24px", marginBottom: 24 }}>
+              <div>
+                <SLabel>Prepared By</SLabel>
+                <select value={is.preparedBy || ""}
+                  onChange={e => setIS({ preparedBy: e.target.value })}
+                  style={{ width: "100%", border: `1px solid ${C.steelLight}`, borderRadius: 4,
+                    padding: "7px 10px", fontSize: 13, outline: "none" }}>
+                  <option value="">— Select —</option>
+                  {STAFF.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div>
+                <SLabel>Date Prepared</SLabel>
+                <input type="date"
+                  value={is.datePrepared || new Date().toISOString().split("T")[0]}
+                  onChange={e => setIS({ datePrepared: e.target.value })}
+                  style={{ border: `1px solid ${C.steelLight}`, borderRadius: 4,
+                    padding: "7px 10px", fontSize: 13, outline: "none" }} />
+              </div>
+            </div>
+
+            {/* ── ACTION BUTTONS ── */}
+            <div style={{ display: "flex", gap: 12, paddingBottom: 32,
+              borderTop: `2px solid ${C.gray200}`, paddingTop: 20 }}>
+              <button onClick={handleApprove} disabled={saving}
+                style={{ background: saving ? C.gray400 : C.green, color: C.white,
+                  border: "none", borderRadius: 7, padding: "11px 28px",
+                  fontSize: 14, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
+                  boxShadow: "0 2px 8px rgba(25,111,61,0.3)" }}>
+                {saving ? "Saving..." : "✓ Approve Job"}
+              </button>
+              <button onClick={handleReturn} disabled={saving}
+                style={{ background: C.amberLight, color: C.amber,
+                  border: `1.5px solid ${C.amberBorder}`, borderRadius: 7,
+                  padding: "11px 22px", fontSize: 14, fontWeight: 700,
+                  cursor: saving ? "not-allowed" : "pointer" }}>
+                ↩ Return to Client
+              </button>
+              <button onClick={handleCancel} disabled={saving}
+                style={{ background: C.redLight, color: C.red,
+                  border: `1.5px solid ${C.redBorder}`, borderRadius: 7,
+                  padding: "11px 22px", fontSize: 14, fontWeight: 700,
+                  cursor: saving ? "not-allowed" : "pointer" }}>
+                ✕ Cancel Job
+              </button>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {confirm && <ConfirmDialog action={confirm} onCancel={() => setConfirm(null)} />}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>
