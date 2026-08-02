@@ -393,10 +393,15 @@ function App() {
   // ── Load data from SharePoint ──────────────────────────────────────────
   const loadJobs = useCallback(async () => {
     try {
-      // Graph API filters on expanded fields use fields/FieldName syntax
-      const filter = "fields/Operational_x0020_Status eq 'New Request' or fields/Operational_x0020_Status eq 'Pending Admin Review'";
-      const data = await spFetch(LISTS.DFS_JOBS, `$filter=${encodeURIComponent(filter)}&$top=100`);
-      const sorted = (data || []).sort((a, b) =>
+      // Fetch all active jobs and filter in JS - Graph API doesn't support SP internal field filters
+      const data = await spFetch(LISTS.DFS_JOBS, "$top=500");
+      const allJobs = data || [];
+      // Filter to only pending review jobs
+      const pendingJobs = allJobs.filter(j => {
+        const status = j.Operational_x0020_Status?.Value ?? j.Operational_x0020_Status ?? j.Operational_x002 ?? "";
+        return status === "New Request" || status === "Pending Admin Review";
+      });
+      const sorted = pendingJobs.sort((a, b) =>
         (SL_ORDER[a.Service_x0020_Level?.Value ?? a.Service_x0020_Level] ?? 9) -
         (SL_ORDER[b.Service_x0020_Level?.Value ?? b.Service_x0020_Level] ?? 9)
       );
