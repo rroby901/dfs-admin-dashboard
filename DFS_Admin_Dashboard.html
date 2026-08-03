@@ -152,10 +152,10 @@ const C = {
 };
 
 const SL_CFG = {
-  "Same Day Rush": { color: C.red,    bg: C.redLight,    border: C.redBorder,   deadline: "Today"   },
-  "Rush":          { color: C.amber,  bg: C.amberLight,  border: C.amberBorder, deadline: "+2 days" },
-  "Urgent":        { color: C.steel,  bg: C.steelXLight, border: C.steelLight,  deadline: "+5 days" },
-  "Routine":       { color: C.gray600,bg: C.gray100,     border: C.gray300,     deadline: "+7 days" },
+  "Same Day Rush": { color: "#FFFFFF", bg: "#0047CC", border: "#003399", deadline: "Today" },
+  "Rush":          { color: "#FFFFFF", bg: "#CC0000", border: "#990000", deadline: "+2 days" },
+  "Urgent":        { color: "#1a1a00", bg: "#FFE600", border: "#CDB900", deadline: "+5 days" },
+  "Routine":       { color: "#FFFFFF", bg: "#1a7a1a", border: "#145714", deadline: "+7 days" },
 };
 const SL_ORDER = { "Same Day Rush": 0, "Rush": 1, "Urgent": 2, "Routine": 3 };
 
@@ -713,7 +713,7 @@ function App() {
                   letterSpacing: "0.8px", marginBottom: 2 }}>First Attempt Deadline</div>
                 <div style={{ fontSize: 14, fontWeight: 700,
                   color: jobSL === "Same Day Rush" ? C.red : C.navy }}>
-                  {SL_CFG[jobSL]?.deadline || "+7 days"} from approval
+                  {jobSL === "Same Day Rush" ? "Today — immediate" : jobSL === "Rush" ? "+2 days from approval" : jobSL === "Urgent" ? "+5 days from approval" : "+7 days from approval"}
                 </div>
               </div>
             </div>
