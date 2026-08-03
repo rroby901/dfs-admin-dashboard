@@ -424,7 +424,7 @@ function App() {
   const loadServers = useCallback(async () => {
     try {
       const data = await spFetch(LISTS.SERVERS, "$top=100");
-      setServers((data || []).map(s => s.Title || s.title));
+      setServers((data || []).map(s => s.Name || s.name || s.Title).filter(Boolean));
     } catch (e) {
       console.warn("Could not load servers:", e.message);
       setServers(["Paris", "Johnson", "Williams", "Davis", "Martinez"]);
@@ -476,13 +476,14 @@ function App() {
           if (is.docketCaseNumber !== undefined) updates["Docket_x0020_Case_x0020_Number"] = is.docketCaseNumber;
           if (is.county) updates["County"] = is.county;
           if (is.alternateAddress !== undefined) updates["Alternate_x0020_Address"] = is.alternateAddress;
+          // Set Client Account lookup using Graph API format
           if (is.existingClient && is.selectedClient) {
-            // Find client ID from clients list and set lookup
             const matchedClient = clients.find(c =>
               (c.Account_x0020_Name || "").toLowerCase() === is.selectedClient.toLowerCase()
             );
             if (matchedClient) {
-              updates["Client_x0020_AccountId"] = matchedClient.ID;
+              // Graph API lookup fields use display name + "LookupId" 
+              updates["Client_x0020_AccountLookupId"] = parseInt(matchedClient.ID);
             }
           }
           await spPatch(LISTS.DFS_JOBS, job.ID, updates);
