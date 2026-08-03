@@ -215,6 +215,14 @@ const SL_ORDER = {
   "Urgent": 2,
   "Routine": 3
 };
+const normalizeSL = sl => {
+  if (!sl) return "Routine";
+  const s = sl.toString().trim();
+  if (s.startsWith("Same Day Rush")) return "Same Day Rush";
+  if (s.startsWith("Rush")) return "Rush";
+  if (s.startsWith("Urgent")) return "Urgent";
+  return "Routine";
+};
 const TN_COUNTIES = ["Anderson", "Bedford", "Benton", "Bledsoe", "Blount", "Bradley", "Campbell", "Cannon", "Carroll", "Carter", "Cheatham", "Chester", "Claiborne", "Clay", "Cocke", "Coffee", "Crockett", "Cumberland", "Davidson", "Decatur", "DeKalb", "Dickson", "Dyer", "Fayette", "Fentress", "Franklin", "Gibson", "Giles", "Grainger", "Greene", "Grundy", "Hamblen", "Hamilton", "Hancock", "Hardeman", "Hardin", "Hawkins", "Haywood", "Henderson", "Henry", "Hickman", "Houston", "Humphreys", "Jackson", "Jefferson", "Johnson", "Knox", "Lake", "Lauderdale", "Lawrence", "Lewis", "Lincoln", "Loudon", "McMinn", "McNairy", "Macon", "Madison", "Marion", "Marshall", "Maury", "Meigs", "Monroe", "Montgomery", "Moore", "Morgan", "Obion", "Overton", "Perry", "Pickett", "Polk", "Putnam", "Rhea", "Roane", "Robertson", "Rutherford", "Scott", "Sequatchie", "Sevier", "Shelby", "Smith", "Stewart", "Sullivan", "Sumner", "Tipton", "Trousdale", "Unicoi", "Union", "Van Buren", "Warren", "Washington", "Wayne", "Weakley", "White", "Williamson", "Wilson"];
 const COMMERCIAL_TYPES = ["Office Building", "Medical Facility", "School / University", "Government Building", "Courthouse", "Apartment Complex", "Retail / Commercial", "Industrial / Warehouse", "Other"];
 const STAFF = ["Parker, MJ", "Roby, R", "Buffalino, E", "Maese, P", "Other"];
@@ -224,7 +232,7 @@ const LOGO_B64 = null;
 const Badge = ({
   level
 }) => {
-  const c = SL_CFG[level] || {
+  const c = SL_CFG[normalizeSL(level)] || {
     color: C.gray600,
     bg: C.gray100,
     border: C.gray300
@@ -703,7 +711,7 @@ function App() {
   }));
   const is = getIS();
   const job = jobs.find(j => j.ID === selectedId);
-  const jobSL = (_ref3 = (_job$Service_x0020_Le = job === null || job === void 0 || (_job$Service_x0020_Le2 = job.Service_x0020_Level) === null || _job$Service_x0020_Le2 === void 0 ? void 0 : _job$Service_x0020_Le2.Value) !== null && _job$Service_x0020_Le !== void 0 ? _job$Service_x0020_Le : job === null || job === void 0 ? void 0 : job.Service_x0020_Level) !== null && _ref3 !== void 0 ? _ref3 : "Routine";
+  const jobSL = normalizeSL((_ref3 = (_job$Service_x0020_Le = job === null || job === void 0 || (_job$Service_x0020_Le2 = job.Service_x0020_Level) === null || _job$Service_x0020_Le2 === void 0 ? void 0 : _job$Service_x0020_Le2.Value) !== null && _job$Service_x0020_Le !== void 0 ? _job$Service_x0020_Le : job === null || job === void 0 ? void 0 : job.Service_x0020_Level) !== null && _ref3 !== void 0 ? _ref3 : "Routine");
   const jobStatus = (_ref4 = (_job$Operational_x = job === null || job === void 0 || (_job$Operational_x2 = job.Operational_x0020_Status) === null || _job$Operational_x2 === void 0 ? void 0 : _job$Operational_x2.Value) !== null && _job$Operational_x !== void 0 ? _job$Operational_x : job === null || job === void 0 ? void 0 : job.Operational_x0020_Status) !== null && _ref4 !== void 0 ? _ref4 : "";
   const filteredJobs = jobs.filter(j => {
     var _ref5, _j$Service_x0020_Leve, _j$Service_x0020_Leve2, _j$Client_x0020_Accou, _j$Person_x0020_Entit, _j$County, _j$Title;
@@ -1038,7 +1046,7 @@ function App() {
   }, jobs.length === 0 ? "No jobs pending review" : "No matching jobs"), filteredJobs.map(j => {
     var _ref6, _j$Service_x0020_Leve5, _j$Service_x0020_Leve6, _ref7, _j$Operational_x0020_3, _j$Operational_x0020_4;
     const sel = j.ID === selectedId;
-    const sl = (_ref6 = (_j$Service_x0020_Leve5 = (_j$Service_x0020_Leve6 = j.Service_x0020_Level) === null || _j$Service_x0020_Leve6 === void 0 ? void 0 : _j$Service_x0020_Leve6.Value) !== null && _j$Service_x0020_Leve5 !== void 0 ? _j$Service_x0020_Leve5 : j.Service_x0020_Level) !== null && _ref6 !== void 0 ? _ref6 : "Routine";
+    const sl = normalizeSL((_ref6 = (_j$Service_x0020_Leve5 = (_j$Service_x0020_Leve6 = j.Service_x0020_Level) === null || _j$Service_x0020_Leve6 === void 0 ? void 0 : _j$Service_x0020_Leve6.Value) !== null && _j$Service_x0020_Leve5 !== void 0 ? _j$Service_x0020_Leve5 : j.Service_x0020_Level) !== null && _ref6 !== void 0 ? _ref6 : "Routine");
     const status = (_ref7 = (_j$Operational_x0020_3 = (_j$Operational_x0020_4 = j.Operational_x0020_Status) === null || _j$Operational_x0020_4 === void 0 ? void 0 : _j$Operational_x0020_4.Value) !== null && _j$Operational_x0020_3 !== void 0 ? _j$Operational_x0020_3 : j.Operational_x0020_Status) !== null && _ref7 !== void 0 ? _ref7 : "";
     return /*#__PURE__*/React.createElement("div", {
       key: j.ID,
@@ -1645,6 +1653,9 @@ function App() {
     onClose: () => setToast(null)
   }));
 }
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+
 
 const _root = ReactDOM.createRoot(document.getElementById("root"));
 _root.render(React.createElement(App));
