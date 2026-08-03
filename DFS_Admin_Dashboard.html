@@ -752,6 +752,29 @@ function App() {
           if (is.docketCaseNumber !== undefined) updates["Docket_x0020_Case_x0020_Number"] = is.docketCaseNumber;
           if (is.county) updates["County"] = is.county;
           if (is.alternateAddress !== undefined) updates["Alternate_x0020_Address"] = is.alternateAddress;
+          if (is.addressType) updates["Address_x0020_Type"] = is.addressType;
+          if (is.commercialType) updates["Commercial_x0020_Type"] = is.commercialType;
+          if (is.subjectPhone) updates["Subject_x0020_Phone"] = is.subjectPhone;
+          if (is.safetyConcerns) updates["Safety_x0020_Concerns"] = is.safetyConcerns;
+          updates["Docs_x0020_Located"] = is.docsLocated ? true : false;
+          updates["Docs_x0020_Copies_x0020_OK"] = is.docsCopiesOk ? true : false;
+          updates["Evasive_x0020_Subject"] = is.evadingService ? true : false;
+          updates["Stakeout_x0020_Authorized"] = is.stakeoutAuth ? true : false;
+          updates["Drop_x0020_Service_x0020_Allowed"] = is.dropAllowed ? true : false;
+          updates["Sub_x002d_Service_x0020_Allowed"] = is.subAllowed ? true : false;
+          updates["Original_x0020_Return_x0020_Requ"] = is.originalReturn ? true : false;
+          updates["Service_x0020_Affidavit_x0020_Re"] = is.affidavitReq ? true : false;
+          updates["Notarization_x0020_Required"] = is.notarizationReq ? true : false;
+          updates["Hostile_x0020_Subject"] = is.hostileSub ? true : false;
+          updates["Media_x0020_Inquiry"] = is.mediaInq ? true : false;
+          updates["Law_x0020_Enforcement_x0020_Invol"] = is.lawEnf ? true : false;
+          updates["Emergency_x0020_Service"] = is.emergServ ? true : false;
+          updates["Judge_x0020_Specific_x0020_Instru"] = is.judgeInstr ? true : false;
+          updates["Server_x0020_Assault_x0020_Flag"] = is.serverAssault ? true : false;
+          updates["Payment_x0020_Dispute"] = is.paymentDisp ? true : false;
+          updates["Process_x0020_Challenge_x0020_Fla"] = is.procChallenge ? true : false;
+          if (is.preparedBy) updates["Prepared_x0020_By"] = is.preparedBy;
+          if (is.alternateAddress !== undefined) updates["Alternate_x0020_Address"] = is.alternateAddress;
           // Set Client Account lookup using Graph API format
           if (is.existingClient && is.selectedClient) {
             const matchedClient = clients.find(c => (c.Account_x0020_Name || "").toLowerCase() === is.selectedClient.toLowerCase());
