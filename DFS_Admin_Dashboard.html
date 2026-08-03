@@ -557,8 +557,8 @@ function App() {
         "Title": formData.accountName,
         "Account_x0020_Name": formData.accountName,
         "Primary_x0020_Contact": formData.contactName,
-        "Email": formData.email,
-        "Phone": formData.phone,
+        "Billing_x0020_Email": formData.email,
+        "Notes": formData.phone ? `Phone: ${formData.phone}` : "",
       });
       await loadClients();
       setIS({ showNewClientForm: false, existingClient: true,
